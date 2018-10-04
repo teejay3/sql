@@ -1,0 +1,159 @@
+-- В данном файле представлены примеры работы со служебными талицами:
+-- вставка, удаление, изменение и получение информации
+
+-- информация об определённом показателе
+
+SELECT
+  kpi_type_id
+  , day_date
+  , kpi_value
+  , abbr
+  , hbase_kpi_id
+  , kpi_id
+  , aggregation_network
+  , aggregation_network_id AS net
+  , aggregation_time
+  , aggregation_time_id AS time
+FROM kpi --sample(1) 
+JOIN v_kpi_id
+ON kpi.kpi_type_id = v_kpi_id.hbase_kpi_id
+WHERE 
+v_kpi_id.aggregation_time_id = 2
+AND
+v_kpi_id.kpi_id = 3214
+AND
+v_kpi_id.aggregation_network_id = any (4, 6)
+AND
+kpi.day_date BETWEEN sysdate - 23 AND sysdate
+--and
+--kpi.abbr = 78
+ORDER BY 2;
+
+--вставка в одну из таблиц
+
+savepoint before_insert;
+insert into kpi (id
+                                , name
+                                , label
+                                , unit_id
+                                , domain_type_id
+                                , subtype_id
+                                , project_id
+                                , multivendor
+                                , navi_user
+                                , navi_date
+                                , cell_type_id
+                                , agg_vendor_method_id
+                                , use_plmn
+                                ,status_id)
+values ((SELECT MAX(ID)+1 FROM KPI) --следующий id
+        , 'Среднее кол пользователей в соте'
+        , ''
+        , 1
+        , 0
+        , 1
+        , 26
+        , 'Y'
+        , user
+        , sysdate
+        , 2
+        , 2
+        , 'N'
+        , 1
+        );
+
+--добавление нового показателя
+undefine str;
+insert into kpi_in_report (report_id, kpi_id, id)
+with 
+str as
+(select '&&str' from dual)
+, k (kpi)
+as
+(
+  select regexp_substr('&str', '\d+',1, level)
+  from str
+  connect by level <= regexp_count('&str', '\d+')
+)
+, rep (rep_id, agg_time, agg_net, kpi)
+as
+(
+    --по компании
+    select id, frequency_id, agg_network_method_id, k.kpi
+    from epm_rep, k
+    where id in (171, 168, 167, 166)
+    union all
+    --по региону
+    select id, frequency_id, agg_network_method_id, k.kpi
+    from epm_reports, k
+    where id in (169, 162, 161, 160)
+    union all
+    --по филиалу
+    select id, frequency_id, agg_network_method_id, k.kpi
+    from epm_rep, k
+    where id in (170, 165, 164, 163)
+    union all
+    --по БС
+    select id, frequency_id, agg_network_method_id
+    from epm_rep
+    where id in (193, 157, 153, 149)
+    union all
+    --по ЦГ
+    select id, frequency_id, agg_network_method_id
+    from epm_rep
+    where id in (192, 158, 154, 150)
+    union all
+    --по соте
+    select id, frequency_id, agg_network_method_id
+    from epm_rep
+    where id in (128, 156, 152, 148)
+    /*union all
+    --по контроллеру
+    select id, frequency_id, agg_network_method_id
+    from epm_rep
+    where id in (194, 195, 129, 196)
+    union all
+    --по фифа
+    select id, frequency_id, agg_network_method_id
+    from epm_rep
+    where id in (109, 108, 107, 106)
+    union all
+    --по link
+    select id, frequency_id, agg_network_method_id
+    from epm_rep
+    where id in (111, 110)*/
+)
+, kpi_rep (kpi, rep_id, id, agg_net, agg_time)
+as
+(
+  select 
+  kir.kpi_id
+  , kir.report_id
+  , kir.id
+  , er.AGG_NETWORK_METHOD_ID
+  , er.FREQUENCY_ID
+from kpi_in_rep kir, rep er
+where 
+kir.kpi_id in (select * from k)
+and
+kir.rep_id = er.id
+and
+er.last_date is null
+and
+er.FREQUENCY_ID in (0, 1, 2, 3)
+)
+, to_insert as
+(
+select
+     rep_id
+     , kpi
+    , agg_net
+    , agg_time
+    , rownum as r
+    from rep
+    where 
+    (kpi, agg_net, agg_time) not in
+    (select kpi, agg_net, agg_time from kpi_rep)
+)
+select rep_id, kpi, (select max(id) + 1 from kpi_in_rep) + r as id
+from to_insert;
