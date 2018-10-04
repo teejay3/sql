@@ -1,0 +1,346 @@
+-- PL/SQL функции, процедуры, пакеты и анонимные блоки
+-- коллекции и триггеры
+
+-- работа со стандартной схемой HR и пакетами
+DECLARE
+    today DATE := SYSDATE;
+    tomorrow today%TYPE;
+BEGIN
+    tomorrow := today + 1;
+    DBMS_OUTPUT.PUT_LINE('Hello World! ' || today || ' ' || tomorrow);
+END;
+/
+
+-- работа с коллекциями
+DECLARE
+    TYPE dept_table_type IS TABLE OF
+    departments.department_name%TYPE
+    INDEX BY PLS_INTEGER;
+    my_dept_table dept_table_type;
+    loop_count NUMBER DEFAULT 10;
+    deptno NUMBER DEFAULT 0;
+BEGIN
+    FOR i IN 1 .. loop_count
+    LOOP
+        deptno := i * loop_count;
+        SELECT departments.department_name INTO my_dept_table(deptno)
+        FROM departments
+        WHERE department_id = deptno;
+    END LOOP;
+    FOR k IN my_dept_table.FIRST .. my_dept_table.LAST
+    LOOP
+        IF MOD(k,loop_count) != 0 THEN continue;
+        ELSE
+            dbms_output.put_line(my_dept_table(k));
+        END IF;
+    END LOOP;
+END;
+/
+
+--анализ запросов
+explain plan for
+select sum(salary), manager_id
+from emp
+group by manager_id;
+select * from table(dbms_xplan.display);
+
+--исключения
+
+create or replace procedure del_job
+(
+    id in jobs.job_id%type
+)
+is
+    not_deleted exception;
+    pragma exception_init(not_deleted, -20010);
+begin
+    delete from jobs
+    where job_id = id;
+    if sql%found = TRUE then dbms_output.put_line('row deleted');
+        else raise_application_error(-20010, 'Now rows for delete');
+    end if;
+exception
+when not_deleted
+then
+    dbms_output.put_Line(sqlerrm || sqlcode || ' No rows deleted');
+when others
+then
+    dbms_output.put_Line(sqlerrm || sqlcode || ' Oops something goes wrong');
+end del_job;
+/
+
+execute del_job('IT_DBA');
+
+--пакеты 
+create or replace package job_pkg
+is
+    procedure add_job(id in jobs.job_id%Type, job_t in jobs.job_title%type);
+    procedure upd_job(id in jobs.job_id%type, job_t in jobs.job_title%type);
+    procedure del_job(id in jobs.job_id%type);
+    function get_job(id in jobs.job_id%type) return jobs.job_title%type;
+end job_pkg;
+/
+
+create or replace package body job_pkg
+is
+PROCEDURE add_job
+(
+    id in jobs.job_id%Type,
+    job_t in jobs.job_title%type
+)
+IS
+BEGIN
+    insert into jobs (job_id, job_title)
+    values (id, job_t);
+EXCEPTION
+WHEN OTHERS
+THEN
+    dbms_output.put_line('Exception thrown');
+END add_job;
+
+procedure upd_job
+(
+    id in jobs.job_id%type,
+    job_t in jobs.job_title%type
+)
+is
+    no_mod exception;
+begin
+    update jobs
+    set job_title = job_t
+    where job_id = id;
+    case sql%found 
+        when TRUE then dbms_output.put_line('row updated');
+        else raise no_mod;
+    end case;
+    dbms_output.put_line('procedure completed');
+exception
+when no_mod
+then
+    dbms_output.put_line(sqlerrm || ': Mo modifications');
+when others
+then
+    dbms_output.put_line('Oops something goes wrong');
+end upd_job;
+
+procedure del_job
+(
+    id in jobs.job_id%type
+)
+is
+    not_deleted exception;
+    pragma exception_init(not_deleted, -20010);
+begin
+    delete from jobs
+    where job_id = id;
+    if sql%found = TRUE then dbms_output.put_line('row deleted');
+        else raise_application_error(-20010, 'Now rows for delete');
+    end if;
+exception
+when not_deleted
+then
+    dbms_output.put_Line(sqlerrm || sqlcode || 'No rows deleted');
+when others
+then
+    dbms_output.put_Line(sqlerrm || sqlcode || ' Oops something goes wrong');
+end del_job;
+
+function get_job
+(id in jobs.job_id%type) 
+return jobs.job_title%type
+is
+    j_title jobs.job_title%type;
+begin
+    select job_title into j_title
+    from jobs
+    where job_id = id;
+    return j_title;
+exception
+when others
+then
+    dbms_output.put_Line(sqlerrm || sqlcode || ' Oops something goes wrong');
+end get_job;
+
+end job_pkg;
+/
+
+--пример перегрузки процедур
+create or replace package emp_pkg
+is
+    procedure add_employee(
+        first_name emp.first_name%type,
+        last_name emp.last_name%type,
+        email emp.email%type,
+        jobid emp.job_id%type default('SA_REP'),
+        mgr emp.manager_id%type default(145),
+        sal emp.salary%type default(1000),
+        comm emp.commission_pct%type default(0),
+        deptid emp.department_id%type default(30));
+    procedure add_employee(
+        f_name emp.first_name%type,
+        l_name emp.last_name%type
+        , deptid emp.department_id%type);
+    procedure get_employee(emp_id in emp.employee_id%type,
+    j_id out emp.job_id%type,
+    sal out emp.salary%type);
+end emp_pkg;
+/
+create or replace package body emp_pkg
+is
+function valid_deptid
+(
+    dep_id emp.department_id%type
+)
+return boolean
+is
+    c pls_integer;
+begin
+    select count(distinct department_id) into c
+    from emp
+    where department_id = dep_id;
+    if c = 0 then return FALSE;
+    else return TRUE;
+    end if;
+end valid_deptid;
+
+procedure add_employee
+(
+    first_name emp.first_name%type,
+    last_name emp.last_name%type,
+    email emp.email%type,
+    jobid emp.job_id%type default('SA_REP'),
+    mgr emp.manager_id%type default(145),
+    sal emp.salary%type default(1000),
+    comm emp.commission_pct%type default(0),
+    deptid emp.department_id%type default(30)
+)
+is
+begin
+    if valid_deptid(deptid) = TRUE then
+    begin
+        dbms_output.put_line('old function');
+      dbms_output.put_line('inserting row');
+      insert into emp
+       (employee_id
+       , first_name
+       , last_name
+       , email
+       , job_id
+       , manager_id
+       , salary
+       , commission_pct
+       , department_id
+       , hire_date
+       )
+       values
+       ((select max(employee_id) + 1 from emp)
+       --employees_seq.nextval()
+       , first_name
+       , last_name
+       , email
+       , jobid
+       , mgr
+       , sal
+       , comm
+       , deptid
+       , trunc(sysdate)
+       );
+    end;
+    else dbms_output.put_line('department ' || deptid || ' not found');
+    end if;
+end add_employee;
+
+procedure add_employee
+(
+    f_name emp.first_name%type,
+    l_name emp.last_name%type,
+    deptid emp.department_id%type
+)
+is
+begin
+    add_employee (
+    first_name => f_name
+    , last_name => l_name
+    , email => upper(concat(substr(f_name, 0, 1), l_name))
+    , deptid => deptid
+    );
+end add_employee;
+
+procedure get_employee
+(
+    emp_id in emp.employee_id%type,
+    j_id out emp.job_id%type,
+    sal out emp.salary%type
+)
+is
+begin
+    select job_id, salary into j_id, sal
+    from emp
+    where employee_id = emp_id;
+    --dbms_output.put_line(j_id || ' ' || sal);
+exception
+when others
+then
+    dbms_output.put_Line(sqlerrm || sqlcode || ' Oops something goes wrong');
+end get_employee;
+
+end emp_pkg;
+/
+
+--forall и bulk collect into
+create or replace package my_pkg authid current_user
+is
+    function get_max(dept_id number) return number;
+    procedure get_text;
+end;
+/
+set serveroutput on;
+create or replace package body my_pkg
+is
+    function get_max (dept_id in number) return number
+    is
+        res  emp.salary%type;
+    begin
+        select max(salary) into res
+        from emp
+        where department_id = dept_id;
+        dbms_output.put_line(res);
+        return res;
+        exception when others
+        then
+            dbms_output.put_line('Error ' || sqlerrm || ' ' || sqlcode);
+    end;
+    
+    procedure get_text
+    is
+        type tbl is table of emp%rowtype;
+        my_tbl tbl;
+        ln emp.last_name%type;
+        sal emp.salary%type;
+        v_stmt varchar2(100);
+        cur_emp sys_refcursor;
+    begin
+        v_stmt := 'select * from emp where department_id = 80';
+        open cur_emp for v_stmt;
+        loop
+            fetch cur_emp bulk collect into my_tbl limit 5;
+            for i in 1 .. my_tbl.count
+            loop
+                dbms_output.put_line(my_tbl(i).last_name || ' ' || my_tbl(i).first_name);
+            end loop;
+            dbms_output.put_line(' 5 rows ');
+            exit when cur_emp%notfound;
+        end loop;
+        close cur_emp;
+        
+        select * bulk collect into my_tbl limit 50 from emp;
+        
+        forall k in indeces of my_tbl
+        
+    end;
+end;
+/
+
+
+
+
