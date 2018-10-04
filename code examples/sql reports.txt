@@ -1,0 +1,342 @@
+-- В данном файле представлены несколько типовых отчётов по технической статистике. 
+-- Основное их назначение- отрисовка графиков и таблиц в SQLDeveloper и
+-- сверка с результатами, полученными при помощи Oracle BI и Cloudera Hadoop.
+
+-- Голосовой трафик , Эрланги, за 2 прошедшие недели
+
+WITH week_by_branch
+  (kpi_value, kpi_id, day_date, abbr) AS
+(
+  SELECT
+      distinct
+      k.kpi_value
+      , v.kpi_id
+      , k.day_date
+      , k.abbr
+  FROM pd.kpi k
+  JOIN pd.v_kpi_id v
+  ON v.he_kpi_id = k.kpi_type_id
+  WHERE
+      v.aggregation_time_id = 9
+  AND 
+      v.aggregation_network_id = 14
+  AND    
+      kpi_id = 1345
+)
+, tbl (b, w1, w2) as
+(
+SELECT
+  DISTINCT
+   rop.branch_abbr as branch,
+  to_char(trunc(60 * (SELECT kpi_value FROM week_by_branch
+    WHERE abbr = rop.dircode
+    AND
+    day_date = (select trunc(sysdate - 14, 'DAY') from dual)
+      ) / 1000000, 3
+  ))
+  ,
+  to_char(trunc(60 * (SELECT kpi_value FROM week_by_branch
+    WHERE abbr = rop.dircode
+    AND 
+    day_date = (select trunc(sysdate - 7, 'DAY') from dual)) / 1000000, 3
+  )) 
+FROM pd.epm_branches rop
+)
+select b, w1 as "week-2" , w2 as "week-1" , round((w2 - w1) / w2, 3) * 100 as "%" from tbl
+ORDER BY 1
+
+-- тот же отчёт по неделям для каждого филиала, Эрланги
+
+SELECT 
+  60 * k.kpi_value / 1000000 as v
+--  , extract(year from k.day_date) as year
+--  , d.cal_week_num_ru as week
+  , k.day_date as da
+  , b.BRANCH_ABBR as br
+FROM pd.kpi k
+  JOIN pd.v_kpi_id v
+  ON v.he_kpi_id = k.kpi_type_id
+  JOIN pd.epm_branches b
+  ON k.abbr = b.dircode
+--  join pd.d_sp_date d
+--  on k.day_date between d.week_start_day_val and d.week_start_day_val + 6
+  WHERE
+      v.aggregation_time_id = 12
+  AND 
+      v.aggregation_network_id = 14
+  AND
+  v.kpi_id = 1345
+ORDER BY da
+
+--как и предыдущий, но только повёрнутый при помощи PIVOT
+
+select * from 
+(SELECT
+  k.day_date as day_date
+   , extract(year from k.day_date) as year
+   , d.cal_week_num_ru as week
+  , k.kpi_value as vv
+  , b.BRANCH_ABBR as br
+FROM pd.kpi k
+  JOIN pd.v_kpi_id v
+  ON v.he_kpi_id = k.kpi_type_id
+  JOIN pd.epm_branches b
+  ON k.abbr = b.dircode
+  join pd.d_sp_date d
+  on k.day_date between d.week_start_day_val and d.week_start_day_val + 6
+  WHERE
+      v.aggregation_time_id = 12
+  AND 
+      v.aggregation_network_id = 14
+  AND
+      v.kpi_id = 1345)
+PIVOT(sum(round(60 * vv / 1000000, 3)) FOR br IN('CNT', 'MSK', 'URL', 'VLG'))
+order by 1,2
+
+-- Голос для всей компании, Эрланги
+
+WITH week_by_company
+  (kpi_value, kpi_id, day_date, abbr) AS
+(
+  SELECT
+      distinct
+      k.kpi_value
+      , v.kpi_id
+      , k.day_date
+      , k.abbr
+  FROM pd.kpi k
+  JOIN pd.v_kpi_id v
+  ON v.he_kpi_id = k.kpi_type_id
+  WHERE
+      v.aggregation_time_id = 12
+  AND 
+      v.aggregation_network_id = 16
+)
+SELECT
+  distinct day_date
+  , extract (year from day_date) || ' ' || d.cal_week_num_ru as week
+  ,trunc((select kpi_value from week_by_company where kpi_id = 1345 and w.day_date = day_date) * 60 / 1000000, 3) as "2G (M)"
+  ,trunc((select kpi_value from week_by_company where kpi_id = 1346 and w.day_date = day_date) * 60 / 1000000, 3) as "3G (M)"
+FROM week_by_company w JOIN pd.d_sp_date d
+ON w.day_date = d.week_start_day_val
+ORDER BY 1 desc
+
+-- Голосовой трафик за две прошедшие недели, Эрланги
+
+WITH week_by_region
+  (kpi_value, kpi_id, day_date, name) AS
+(
+  SELECT
+      distinct
+      k.kpi_value
+      , v.kpi_id
+      , k.day_date
+      , ropm.name
+  FROM pd.kpi k
+  JOIN pd.v_kpi_id v
+  ON v.he_kpi_id = k.kpi_type_id
+  JOIN pd.pmr_ropm ropm
+  ON ropm.code = k.abbr
+  WHERE
+      v.aggregation_time_id = 12
+  AND 
+      v.aggregation_network_id = 13
+  AND    
+      kpi_id = 1325
+)
+, tbl (b, w1, w2) as
+(
+SELECT
+  DISTINCT
+   name as branch,
+  to_char(trunc(60 * (SELECT kpi_value FROM week_by_region
+    WHERE name = r.name
+    AND
+    day_date = (select trunc(sysdate - 14, 'DAY') from dual) ) / 1000000, 3)),
+  to_char(trunc(60 * (SELECT kpi_value FROM week_by_region
+    WHERE name = r.name
+    AND 
+    day_date = (select trunc(sysdate - 7, 'DAY') from dual)) / 1000000, 3)) 
+FROM week_by_region r
+)
+select b, w1 as "week-2" , w2 as "week-1" , round((w2 - w1) / w2, 3) * 100 as "%" from tbl
+ORDER BY 1
+
+-- График тренда голосовой связи по неделям, по компании в целом
+WITH week_by_company
+  (kpi_value, kpi_id, day_date, abbr) AS
+(
+  SELECT
+      distinct
+      k.kpi_value
+      , v.kpi_id
+      , k.day_date
+      , k.abbr
+  FROM pd.kpi k
+  JOIN pd.v_kpi_id v
+  ON v.he_kpi_id = k.kpi_type_id
+  WHERE
+      v.aggregation_time_id = 12
+  AND 
+      v.aggregation_network_id = 16
+)
+, total (day_date, week, s) as
+(
+SELECT
+  distinct day_date
+  , extract (year from day_date) || ' ' || d.cal_week_num_ru as week
+  , trunc(
+    (select kpi_value from week_by_company where kpi_id = 1345 and w.day_date = day_date) +
+    (select kpi_value from week_by_company where kpi_id = 1346 and w.day_date = day_date)
+    , 3) as summary
+FROM week_by_company w JOIN pd.d_sp_date d
+ON w.day_date = d.week_start_day_val
+)
+select
+  day_date
+  , week
+--  , s
+  , round(100 * (s / lag(s,1) over (order by day_date asc) - 1), 3) as trend
+from total
+order by day_date
+
+--Сравнение ряда KPI в одной таблице за определённый период времени
+
+SELECT "KPI", "h-R", "d-R", "w-R", "m-R", "h-B", "d-B", "w-B", "m-B", "h-C", "d-C", "w-C", "m-C" FROM(
+select
+    distinct kpi_id as kpi
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 0
+        and 
+        id.aggregation_network_id = 3) as "h-R"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 1
+        and 
+        id.aggregation_network_id = 3) as "d-R"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 2
+        and 
+        id.aggregation_network_id = 3) as "w-R"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 3
+        and 
+        id.aggregation_network_id = 3) as "m-R"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 0
+        and 
+        id.aggregation_network_id = 4) as "h-B"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 1
+        and 
+        id.aggregation_network_id = 4) as "d-B"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 2
+        and 
+        id.aggregation_network_id = 4) as "w-B"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 3
+        and 
+        id.aggregation_network_id = 4) as "m-B"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 0
+        and 
+        id.aggregation_network_id = 6) as "h-C"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 1
+        and 
+        id.aggregation_network_id = 6) as "d-C"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 2
+        and 
+        id.aggregation_network_id = 6) as "w-C"
+    , (
+        select 
+        count(*)
+        from pd.kpi k join pd.v_kpi_id id
+        on id.he_kpi_id = k.kpi_type_id
+        where
+        id.kpi_id = vv.kpi_id
+        and
+        id.aggregation_time_id = 3
+        and 
+        id.aggregation_network_id = 6) as "m-C"
+from pd.v_kpi_id vv
+where kpi_id in (1385, 1387, 1386, 2591, 1592, 1388, 1389, 2384, 1383)
+)
